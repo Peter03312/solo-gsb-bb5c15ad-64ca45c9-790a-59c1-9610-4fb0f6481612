@@ -6,6 +6,7 @@ const db = require('./db');
 const geo = require('./geometry');
 const cut = require('./cutting');
 const leadDiff = require('./leaddiff');
+const print = require('./print');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
@@ -311,6 +312,57 @@ app.get('/api/designs/:designId/publications/:version', (req, res) => {
   const pub = db.getPublicationByVersion(design.id, Number(req.params.version));
   if (!pub) return fail(res, 404, '发布版不存在');
   res.json({ ok: true, publication: pub });
+});
+
+// ---------- 已发布图纸 1:1 分张打印（只读） ----------
+// 不写任何数据：不改草稿、发布快照、生产计划或库存。
+// POST .../print/preview 入参（整数毫米）：
+//   paperWidth/paperHeight 纸张宽高（正）、marginTop/Right/Bottom/Left 四边留白（可 0）、
+//   overlap 相邻页重叠宽度（正，且须小于任一可打印边长）。
+function resolvePrintRequest(req, res, { query }) {
+  const design = loadDesignOr404(req, res);
+  if (!design) return null;
+  const version = Number(req.params.version);
+  if (!Number.isInteger(version) || version <= 0) {
+    fail(res, 400, '版本号必须是正整数');
+    return null;
+  }
+  const publication = db.getPublicationByVersion(design.id, version);
+  if (!publication) {
+    fail(res, 404, `发布版 v${version} 不存在`);
+    return null;
+  }
+  const parsed = print.parseParams(query ? req.query : (req.body || {}), { query });
+  if (!parsed.ok) {
+    fail(res, 400, parsed.error);
+    return null;
+  }
+  const plan = print.planTiles(publication.snapshot, parsed.params);
+  if (!plan.ok) {
+    if (plan.code === 'too_many_pages') return fail(res, 422, plan.error);
+    return fail(res, 400, plan.error);
+  }
+  return { publication, params: parsed.params, plan };
+}
+
+app.post('/api/designs/:designId/publications/:version/print/preview', (req, res) => {
+  const ctx = resolvePrintRequest(req, res, { query: false });
+  if (!ctx) return;
+  res.json({ ok: true, preview: print.buildPreview(ctx) });
+});
+
+// 逐页下载 SVG：同样的参数以 query 传入（浏览器可直接打开/另存）。
+app.get('/api/designs/:designId/publications/:version/print/:page/svg', (req, res) => {
+  const ctx = resolvePrintRequest(req, res, { query: true });
+  if (!ctx) return;
+  const page = Number(req.params.page);
+  if (!Number.isInteger(page) || page <= 0) return fail(res, 400, '页码必须是正整数');
+  const svg = print.renderPageSvg({ ...ctx, page });
+  if (svg === null) return fail(res, 404, `第 ${page} 页不存在（共 ${ctx.plan.pageCount} 页）`);
+  const filename = `design${ctx.publication.designId}-v${ctx.publication.version}-page${page}-of${ctx.plan.pageCount}.svg`;
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  res.send(svg);
 });
 
 // ---------- 铅条原材库存 ----------

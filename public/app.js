@@ -1334,6 +1334,96 @@ function renderPlanList() {
 
 // ---------- 事件绑定 ----------
 
+// ================= 已发布图纸 · 1:1 分张打印 =================
+
+const printState = { preview: null };
+
+function printInputs() {
+  const n = (id) => Number(document.getElementById(id).value);
+  return {
+    paperWidth: n('printPaperW'),
+    paperHeight: n('printPaperH'),
+    marginTop: n('printMarginT'),
+    marginRight: n('printMarginR'),
+    marginBottom: n('printMarginB'),
+    marginLeft: n('printMarginL'),
+    overlap: n('printOverlap'),
+  };
+}
+
+function printMsg(text, bad) {
+  const el = document.getElementById('printMsg');
+  el.textContent = text || '';
+  el.style.color = bad ? '#c0281c' : '';
+}
+
+async function runPrintPreview() {
+  if (!currentPub) {
+    printMsg('请先在上方选择图纸与发布版本。', true);
+    return;
+  }
+  const body = printInputs();
+  try {
+    const data = await api('POST',
+      `/api/designs/${currentPub.designId}/publications/${currentPub.version}/print/preview`, body);
+    printState.preview = data.preview;
+    renderPrintPreview();
+    printMsg('');
+  } catch (err) {
+    printState.preview = null;
+    renderPrintPreview();
+    printMsg('⛔ ' + err.message, true);
+  }
+}
+
+const SIDE_ZH = { left: '左', right: '右', top: '上', bottom: '下' };
+
+function renderPrintPreview() {
+  const el = document.getElementById('printPreviewContent');
+  const pv = printState.preview;
+  if (!pv) {
+    el.className = 'hint';
+    el.textContent = '选择发布版本并输入纸张、留白与重叠后，点击“生成分张预览”。SVG 以毫米设定物理尺寸，可直接 1:1 打印。';
+    return;
+  }
+  let html = `<div class="plan-head">
+    <div><b>${escapeHtml(pv.designName)} v${pv.version} · 1:1 分张预览（只读）</b></div>
+    <div class="muted">图纸 ${pv.drawing.width} × ${pv.drawing.height} mm；纸张 ${pv.paper.width} × ${pv.paper.height} mm；
+      可打印区 ${pv.paper.printableWidth} × ${pv.paper.printableHeight} mm；重叠 ${pv.overlap} mm</div>
+    <div class="stock-badge ok">共 ${pv.grid.cols} 列 × ${pv.grid.rows} 行 ＝ <b>${pv.grid.pageCount}</b> 页（上限 ${pv.grid.maxPages}）</div>
+    </div>`;
+  html += '<div class="print-grid">';
+  for (const p of pv.pages) {
+    const seams = p.overlapEdges.map((e) =>
+      `${SIDE_ZH[e.side]}↔第${e.overlapsPage}页`).join('，');
+    html += `<div class="print-page-card">
+      <div class="pp-head">第 ${p.page} 页 · ${p.col}列${p.row}行</div>
+      <img class="pp-thumb" src="${p.svgUrl}" alt="第 ${p.page} 页 SVG" loading="lazy">
+      <div class="muted small">图纸坐标 x ${p.coverage.x0}–${p.coverage.x1}，y ${p.coverage.y0}–${p.coverage.y1} mm</div>
+      <div class="muted small">覆盖 ${p.coverage.width} × ${p.coverage.height} mm；本页编号：${
+        p.pieceLabels.length ? p.pieceLabels.map((q) => `#${q.pieceNo}`).join('、') : '—'}</div>
+      <div class="muted small">拼接：${seams || '—'}</div>
+      <a class="pp-download" href="${p.svgUrl}" download target="_blank" rel="noopener">下载本页 SVG</a>
+    </div>`;
+  }
+  html += '</div>';
+  el.className = '';
+  el.innerHTML = html;
+}
+
+document.getElementById('btnPrintPreview').addEventListener('click', runPrintPreview);
+// 切换图纸或发布版本时清空旧预览，避免误下旧版本
+document.getElementById('pubDesignSelect').addEventListener('change', () => {
+  printState.preview = null;
+  renderPrintPreview();
+  printMsg('');
+});
+document.getElementById('pubVersionSelect').addEventListener('change', () => {
+  printState.preview = null;
+  renderPrintPreview();
+  printMsg('');
+});
+
 document.getElementById('btnMatAdd').addEventListener('click', addMaterial);
 document.getElementById('planDesignSelect').addEventListener('change', loadPlanVersions);
 document.getElementById('btnPlanPreview').addEventListener('click', previewPlan);

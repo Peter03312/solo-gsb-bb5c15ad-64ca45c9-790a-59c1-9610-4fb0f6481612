@@ -106,9 +106,36 @@
         <h2>铅条下料清单</h2>
         <div id="pubLeadList"></div>
       </section>
+      <section>
+        <h2>1:1 分张打印</h2>
+        <div class="hint">把所选不可变快照按实物 1:1 拆到多张纸上，供大窗框现场拼接定位。预览与下载均为只读，不影响草稿/发布版/计划/库存。</div>
+        <div class="form-row two">
+          <label>纸宽 (mm)<input id="printPaperW" type="number" min="1" step="1" value="210"></label>
+          <label>纸高 (mm)<input id="printPaperH" type="number" min="1" step="1" value="297"></label>
+        </div>
+        <div class="form-row two">
+          <label>上留白<input id="printMarginT" type="number" min="0" step="1" value="10"></label>
+          <label>右留白<input id="printMarginR" type="number" min="0" step="1" value="10"></label>
+        </div>
+        <div class="form-row two">
+          <label>下留白<input id="printMarginB" type="number" min="0" step="1" value="10"></label>
+          <label>左留白<input id="printMarginL" type="number" min="0" step="1" value="10"></label>
+        </div>
+        <div class="form-row">
+          <label>相邻页重叠 (mm，正整数)<input id="printOverlap" type="number" min="1" step="1" value="15"></label>
+        </div>
+        <div class="btn-row">
+          <button id="btnPrintPreview" class="primary">生成分张预览</button>
+        </div>
+        <div id="printMsg" class="hint"></div>
+      </section>
     </aside>
     <section class="canvas-wrap">
-      <canvas id="pubCanvas" width="900" height="640"></canvas>
+      <canvas id="pubCanvas" width="900" height="420"></canvas>
+      <div id="printPreviewBox" class="lead-panel">
+        <h2>分张预览 / 逐页 SVG 下载</h2>
+        <div id="printPreviewContent" class="hint">选择发布版本并输入纸张、留白与重叠后，点击“生成分张预览”。SVG 以毫米设定物理尺寸，可直接 1:1 打印。</div>
+      </div>
     </section>
   </main>
 

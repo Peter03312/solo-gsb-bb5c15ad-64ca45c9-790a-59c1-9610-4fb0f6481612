@@ -224,3 +224,38 @@ td.added.num, th.added.num { color: #2e7d4f; }
   border: 1px solid #d32f2f;
 }
 .diff-legend .lg.added { background: #2e7d4f; }
+
+/* ---------- 1:1 分张打印 ---------- */
+.print-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.print-page-card {
+  border: 1px solid #d8d4c8;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pp-head { font-weight: bold; font-size: 13px; }
+.pp-thumb {
+  width: 100%;
+  border: 1px solid #e3ded2;
+  background: #fbfaf7;
+  border-radius: 4px;
+}
+.pp-download {
+  margin-top: auto;
+  align-self: flex-start;
+  font-size: 13px;
+  color: var(--primary, #1565c0);
+  text-decoration: none;
+  border: 1px solid currentColor;
+  border-radius: 14px;
+  padding: 2px 12px;
+}
+.pp-download:hover { background: #eef3fa; }
