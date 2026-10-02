@@ -708,13 +708,16 @@ function switchTab(which) {
   document.getElementById('tabDraft').classList.toggle('active', which === 'draft');
   document.getElementById('tabPublished').classList.toggle('active', which === 'published');
   document.getElementById('tabDiff').classList.toggle('active', which === 'diff');
+  document.getElementById('tabPrint').classList.toggle('active', which === 'print');
   document.getElementById('tabProduction').classList.toggle('active', which === 'production');
   document.getElementById('viewDraft').hidden = which !== 'draft';
   document.getElementById('viewPublished').hidden = which !== 'published';
   document.getElementById('viewDiff').hidden = which !== 'diff';
+  document.getElementById('viewPrint').hidden = which !== 'print';
   document.getElementById('viewProduction').hidden = which !== 'production';
   if (which === 'published') loadPubVersions();
   if (which === 'diff') enterDiff();
+  if (which === 'print') enterPrint();
   if (which === 'production') enterProduction();
 }
 
@@ -952,6 +955,7 @@ function drawDiffSegments(list, kind, t, offsetPx) {
 }
 
 document.getElementById('tabDiff').addEventListener('click', () => switchTab('diff'));
+document.getElementById('tabPrint').addEventListener('click', () => switchTab('print'));
 document.getElementById('diffDesignSelect').addEventListener('change', loadDiffVersions);
 document.getElementById('btnDiffRun').addEventListener('click', runDiff);
 
@@ -1337,3 +1341,295 @@ function renderPlanList() {
 document.getElementById('btnMatAdd').addEventListener('click', addMaterial);
 document.getElementById('planDesignSelect').addEventListener('change', loadPlanVersions);
 document.getElementById('btnPlanPreview').addEventListener('click', previewPlan);
+
+// ================= 已发布图纸 1:1 分张打印 =================
+
+const printState = {
+  snapshot: null,   // 所选不可变发布版快照
+  version: null,
+  preview: null,    // 预览返回的 print 结构
+  params: null,
+  designId: null,
+  activePage: 1,
+};
+
+const printCanvas = document.getElementById('printCanvas');
+const printCtx = printCanvas.getContext('2d');
+
+function printBanner(kind, msg) {
+  const b = document.getElementById('printBanner');
+  if (!kind) { b.hidden = true; b.textContent = ''; return; }
+  b.className = `banner ${kind === 'error' ? 'error' : 'success'}`;
+  b.hidden = false;
+  b.textContent = msg;
+}
+
+async function enterPrint() {
+  printBanner(false);
+  const data = await api('GET', '/api/designs');
+  const sel = document.getElementById('printDesignSelect');
+  const prev = sel.value;
+  sel.innerHTML = '';
+  for (const d of data.designs) {
+    const opt = document.createElement('option');
+    opt.value = d.id;
+    opt.textContent = d.latest_version
+      ? `${d.name}（${d.width}×${d.height}mm · 最新 v${d.latest_version}）`
+      : `${d.name}（暂无发布版）`;
+    sel.appendChild(opt);
+  }
+  if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  await loadPrintVersions();
+  if (printState.preview) renderPrintCanvas();
+}
+
+async function loadPrintVersions() {
+  const id = Number(document.getElementById('printDesignSelect').value);
+  const sel = document.getElementById('printVersionSelect');
+  sel.innerHTML = '';
+  printState.snapshot = null;
+  if (!id) return;
+  const data = await api('GET', `/api/designs/${id}/publications`);
+  if (!data.publications.length) {
+    sel.innerHTML = '<option value="">（暂无发布版）</option>';
+    return;
+  }
+  for (const p of data.publications) {
+    const opt = document.createElement('option');
+    opt.value = p.version;
+    opt.textContent = `v${p.version} · ${p.publishedAt}`;
+    sel.appendChild(opt);
+  }
+}
+
+function printParamsFromForm() {
+  return {
+    paperWidth: Number(document.getElementById('printPaperW').value),
+    paperHeight: Number(document.getElementById('printPaperH').value),
+    margin: Number(document.getElementById('printMargin').value),
+    overlap: Number(document.getElementById('printOverlap').value),
+  };
+}
+
+async function runPrintPreview() {
+  const designId = Number(document.getElementById('printDesignSelect').value);
+  const version = Number(document.getElementById('printVersionSelect').value);
+  if (!designId || !version) { printBanner('error', '请先选择图纸与已发布版本'); return; }
+  const params = printParamsFromForm();
+  try {
+    const [pv, pubd] = await Promise.all([
+      api('POST', `/api/designs/${designId}/publications/${version}/print/preview`, params),
+      api('GET', `/api/designs/${designId}/publications/${version}`),
+    ]);
+    printState.designId = designId;
+    printState.version = version;
+    printState.params = params;
+    printState.preview = pv.preview.print;
+    printState.snapshot = pubd.publication.snapshot;
+    printState.activePage = 1;
+    renderPrintResult();
+    printBanner(false);
+  } catch (err) {
+    printState.preview = null;
+    document.getElementById('printSummarySection').hidden = true;
+    document.getElementById('printPageListSection').hidden = true;
+    printCtx.clearRect(0, 0, printCanvas.width, printCanvas.height);
+    printBanner('error', '⛔ ' + err.message);
+  }
+}
+
+function renderPrintResult() {
+  const P = printState.preview;
+  document.getElementById('printSummarySection').hidden = false;
+  document.getElementById('printPageListSection').hidden = false;
+  document.getElementById('printSummary').innerHTML = `
+    <div class="muted">
+      <b>${escapeHtml(printState.snapshot.name)}</b> v${printState.version} ·
+      图纸 ${P.content.width} × ${P.content.height} mm
+    </div>
+    <div class="stock-badge ok">共 <b>${P.rows}</b> 行 × <b>${P.cols}</b> 列 ＝
+      <b>${P.totalPages}</b> 页</div>
+    <div class="muted small">纸张 ${P.paper.width} × ${P.paper.height} mm ｜ 留白 ${P.margin} mm ｜
+      可打印 ${P.printable.width} × ${P.printable.height} mm ｜ 相邻页重叠 ${P.overlap} mm</div>
+    <div class="muted small">${escapeHtml(P.pageNumbering)}</div>`;
+
+  const ul = document.getElementById('printPageList');
+  ul.innerHTML = '';
+  for (const pg of P.pages) {
+    const li = document.createElement('li');
+    li.className = 'print-page-item';
+    li.dataset.page = pg.page;
+    const seamTxt = pg.seams
+      .map((s) => `${({ left: '左', right: '右', top: '上', bottom: '下' })[s.edge]}→第${s.neighborPage}页`)
+      .join('，');
+    li.innerHTML = `<div><b>第 ${pg.page}/${P.totalPages} 页</b>
+        <span class="muted small">（${pg.row}行 ${pg.col}列）</span></div>
+      <div class="small muted">覆盖 x ${pg.coverage.x0}–${pg.coverage.x1}，y ${pg.coverage.y0}–${pg.coverage.y1} mm
+        （${pg.coverage.width} × ${pg.coverage.height} mm）</div>
+      <div class="small">${seamTxt ? `拼接：${seamTxt}` : '本页无需拼接'}</div>`;
+    const dl = document.createElement('button');
+    dl.className = 'icon-btn';
+    dl.title = '下载本页 SVG（1:1 毫米尺寸）';
+    dl.textContent = '⬇ SVG';
+    dl.addEventListener('click', (e) => { e.stopPropagation(); downloadPageSvg(pg.page); });
+    li.appendChild(dl);
+    li.addEventListener('click', () => { printState.activePage = pg.page; renderPrintCanvas(); markActivePage(); });
+    ul.appendChild(li);
+  }
+  markActivePage();
+  renderPrintCanvas();
+}
+
+function markActivePage() {
+  document.querySelectorAll('.print-page-item').forEach((li) => {
+    li.classList.toggle('active', Number(li.dataset.page) === printState.activePage);
+  });
+}
+
+// 直接用浏览器导航 svgUrl（同站 GET），浏览器对 image/svg+xml 触发下载/打开；
+// 为强制“另存”，fetch 成 Blob 后用 a[download] 保存。
+async function downloadPageSvg(page) {
+  const pg = printState.preview.pages.find((p) => p.page === page);
+  if (!pg) return;
+  const resp = await fetch(pg.svgUrl);
+  if (!resp.ok) {
+    const d = await resp.json().catch(() => ({}));
+    printBanner('error', '⛔ ' + (d.error || `下载失败 (${resp.status})`));
+    return;
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `design-${printState.designId}-v${printState.version}-page-${page}of${printState.preview.totalPages}.svg`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function downloadAllSvgs() {
+  if (!printState.preview) return;
+  for (const pg of printState.preview.pages) {
+    // 顺序下载，避免浏览器同时弹出大量保存框
+    await downloadPageSvg(pg.page);
+    await new Promise((r) => setTimeout(r, 350));
+  }
+}
+
+// ---------- 拼接示意画布 ----------
+
+function renderPrintCanvas() {
+  const cv = printCanvas, cx = printCtx;
+  cx.clearRect(0, 0, cv.width, cv.height);
+  const P = printState.preview;
+  const s = printState.snapshot;
+  if (!P || !s) return;
+
+  // 以图纸坐标系铺满画布
+  const pad = 46;
+  const scale = Math.min((cv.width - pad * 2) / s.width, (cv.height - pad * 2 - 24) / s.height);
+  const ox = (cv.width - s.width * scale) / 2;
+  const oy = (cv.height - s.height * scale) / 2 + 10;
+  const toPx = (x, y) => [ox + x * scale, cv.height - (oy + y * scale)];
+
+  // 图纸底
+  cx.fillStyle = '#fbfaf7';
+  cx.fillRect(...toPx(0, s.height), s.width * scale, s.height * scale);
+
+  // 玻璃片（淡色）
+  for (const pc of s.pieces) {
+    const pts = pc.polygon.map(([x, y]) => toPx(x, y));
+    cx.beginPath();
+    cx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) cx.lineTo(pts[i][0], pts[i][1]);
+    cx.closePath();
+    cx.fillStyle = pc.color;
+    cx.globalAlpha = 0.35;
+    cx.fill();
+    cx.globalAlpha = 1;
+    cx.strokeStyle = '#999';
+    cx.lineWidth = 1;
+    cx.stroke();
+  }
+
+  // 每页覆盖矩形（蓝框）+ 重叠带高亮
+  for (const pg of P.pages) {
+    const [rx0, ry1] = toPx(pg.coverage.x0, pg.coverage.y0);
+    const w = pg.coverage.width * scale, h = pg.coverage.height * scale;
+    const active = pg.page === printState.activePage;
+    cx.strokeStyle = active ? '#0d47a1' : '#1565c0';
+    cx.lineWidth = active ? 2.6 : 1.3;
+    cx.setLineDash(active ? [] : [6, 3]);
+    cx.strokeRect(rx0, ry1 - h, w, h);
+    cx.setLineDash([]);
+    // 页码标签（左上角）
+    cx.fillStyle = active ? '#0d47a1' : 'rgba(21,101,192,0.85)';
+    cx.font = 'bold 12px sans-serif';
+    cx.textAlign = 'left';
+    cx.textBaseline = 'top';
+    cx.fillText(`${pg.page}`, rx0 + 3, ry1 - h + 3);
+  }
+
+  // 拼接边（绿虚线）与对位十字（红）
+  for (const pg of P.pages) {
+    for (const seam of pg.seams) {
+      // 每条拼接边画一次（只画 left/bottom 边，避免重复）
+      if (seam.edge === 'right' || seam.edge === 'top') continue;
+      const b = seam.overlap;
+      cx.fillStyle = 'rgba(21,101,192,0.12)';
+      const [bx0, by1] = toPx(b.x0, b.y0);
+      cx.fillRect(bx0, by1 - b.height * scale, b.width * scale, b.height * scale);
+      cx.strokeStyle = '#2e7d4f';
+      cx.lineWidth = 1.6;
+      cx.setLineDash([7, 4]);
+      cx.beginPath();
+      if (seam.direction === 'vertical') {
+        const [x1, y1] = toPx(seam.drawingCoord, pg.coverage.y0);
+        const [, y2] = toPx(seam.drawingCoord, pg.coverage.y1);
+        cx.moveTo(x1, y1); cx.lineTo(x1, y2);
+      } else {
+        const [x1, y1] = toPx(pg.coverage.x0, seam.drawingCoord);
+        const [x2] = toPx(pg.coverage.x1, seam.drawingCoord);
+        cx.moveTo(x1, y1); cx.lineTo(x2, y1);
+      }
+      cx.stroke();
+      cx.setLineDash([]);
+      for (const cr of seam.crosses) {
+        const [px2, py2] = toPx(cr.x, cr.y);
+        cx.strokeStyle = '#c62828';
+        cx.lineWidth = 1.4;
+        cx.beginPath();
+        cx.moveTo(px2 - 6, py2); cx.lineTo(px2 + 6, py2);
+        cx.moveTo(px2, py2 - 6); cx.lineTo(px2, py2 + 6);
+        cx.stroke();
+      }
+    }
+  }
+
+  // 外框
+  cx.strokeStyle = '#222';
+  cx.lineWidth = 2.4;
+  cx.strokeRect(...toPx(0, s.height), s.width * scale, s.height * scale);
+
+  // 坐标注记
+  cx.fillStyle = '#666';
+  cx.font = '11px sans-serif';
+  cx.textAlign = 'center';
+  cx.fillText(`图纸 ${s.width} mm`, ox + s.width * scale / 2, cv.height - 8);
+  cx.save();
+  cx.translate(12, oy + s.height * scale / 2);
+  cx.rotate(-Math.PI / 2);
+  cx.fillText(`${s.height} mm`, 0, 0);
+  cx.restore();
+
+  document.getElementById('printCanvasHint').textContent =
+    P.totalPages === 1
+      ? '图纸在一张纸内即可完整打印，无需拼接。'
+      : `共 ${P.totalPages} 页：蓝色虚线框为每页覆盖的图纸坐标，绿色虚线为拼接边，` +
+        `红色十字为跨页对位标记（相邻页使用同一图纸坐标），蓝色色块为重叠区域。点击左侧列表高亮单页。`;
+}
+
+document.getElementById('printDesignSelect').addEventListener('change', loadPrintVersions);
+document.getElementById('btnPrintPreview').addEventListener('click', runPrintPreview);
+document.getElementById('btnPrintDownloadAll').addEventListener('click', downloadAllSvgs);

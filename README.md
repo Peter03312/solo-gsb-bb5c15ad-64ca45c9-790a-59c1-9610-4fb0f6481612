@@ -6,6 +6,8 @@
 
 工作室调整拼片并再次发布后，还可选择**同一图纸的任意两个已发布版本核对铅条下料变化**：按几何位置比较内部公共边与四根外框，区分沿用/取消/新增，部分重叠自动拆分；核对全程**只读**，不影响发布快照、生产计划与库存。
 
+大窗框现场拼接时，可对已发布图纸按**实物 1:1 分张打印**：选择不可变发布版本，输入纸张宽高、四边留白与相邻页重叠宽度（整数毫米），预览按行列编号的总页数、每页覆盖的图纸坐标与拼接标记，并逐页下载物理尺寸为毫米的 SVG；玻璃片轮廓、编号与外框全部取自所选发布快照，跨页轮廓裁切到可打印区域，页内带毫米校准标尺。分张预览与下载全程**只读**。
+
 ## 功能一览
 
 - **窗框建模**：宽、高为正整数毫米（1–100000）。
@@ -39,6 +41,13 @@
   - **幂等与释放**：重复确认不会重复预留；取消只释放一次，重复取消不重复改库存；已确认计划不可删除（须先取消）。
   - **快照绑定**：计划一旦建立即绑定该发布版本，后续草稿改动或再发布新版本**都不影响**其用料。
   - 网页“铅条生产”标签可登记库存、预览、确认/取消计划并查看可用库存。
+- **1:1 分张打印（本轮新增）**：
+  - 在“分张打印”标签选择图纸与**已发布版本**，输入**纸张宽高、四边留白、相邻页重叠宽度（整数毫米）**生成拼接预览；
+  - 玻璃片轮廓/编号/颜色/面积与外框**全部取自所选不可变快照**，草稿改动或再发布均不影响已生成的分页（重新预览才取新版本）；
+  - 预览给出**行列编号总页数**（行自下而上对应图纸 y 轴、列自左而右）、**每页覆盖的图纸坐标范围**与四边**拼接标记**（邻页页码、重叠带、红色对位十字及其图纸坐标）；
+  - 每页可**单独下载 SVG**，也可一键逐页下载：`width/height` 以 **mm** 标定物理尺寸，图纸内容按 1:1 绘制并**裁剪到可打印区域**，重叠带在相邻两页使用**完全相同的图纸坐标**，页内含**毫米校准标尺**（打印请选“实际大小/100%”）；
+  - **校验**：纸张尺寸与重叠必须为正，留白可为零；可打印尺寸非正、重叠不小于任一可打印边长、版本不存在、总页数超过 **200** 时**明确拒绝且不输出部分页面**；
+  - 预览与下载均为**只读**，不修改草稿、发布版、生产计划或库存。
 
 ## 技术栈
 
@@ -119,6 +128,8 @@ Compose 中通过命名卷 `studio-data` 持久化 `/data`；改宿主机端口�
 | GET | `/api/designs/:id/publications` | 发布版列表 |
 | GET | `/api/designs/:id/publications/:version` | 查阅指定发布版（不可变快照） |
 | GET | `/api/designs/:id/publications/diff?fromVersion=1&toVersion=2` | 两版铅条核对（版本号；自动按版本号定较早/较晚，只读） |
+| POST | `/api/designs/:id/publications/:version/print/preview` | 1:1 分张打印预览 `{paperWidth,paperHeight,margin,overlap}`（整数毫米，只读） |
+| GET | `/api/designs/:id/publications/:version/print/page?paperWidth&paperHeight&margin&overlap&page=n` | 下载指定页 SVG（`image/svg+xml`，物理尺寸 mm，只读） |
 | POST | `/api/publications/diff` | 两版铅条核对 `{publicationIdA,publicationIdB}`（非同图纸返回 400） |
 | GET | `/api/materials` | 铅条原材规格与库存（含已预留/可用根数） |
 | POST | `/api/materials` | 登记原材 `{name,length,stock}`（定尺正数 mm、库存非负整数） |
@@ -150,6 +161,7 @@ Compose 中通过命名卷 `studio-data` 持久化 `/data`；改宿主机端口�
 6. 发布后仍可继续编辑草稿（产生新版本），旧版本内容保持不变。
 7. 切到“版本核对”标签：选择图纸与较早/较晚两个发布版 → “核对铅条下料变化”：画布与表格展示沿用（蓝实线）、取消（红虚线）、新增（绿实线）每一段的位置与长度，以及内部公共边、四根外框与总计三类合计。
 8. 切到“铅条生产”标签：登记原材定尺与库存根数 → 选发布版本/件数/原材/每刀损耗 → “排产预览”查看逐根切段与余料 → “存为草稿计划” → 库存足够时“确认计划”原子预留；需要退料时“取消计划”释放预留。
+9. 切到“分张打印”标签：选图纸与已发布版本 → 输入纸张宽高、四边留白与相邻页重叠（整数毫米）→ “生成拼接预览”查看行列总页数、每页覆盖坐标与拼接标记 → 逐页或一键“逐页下载全部 SVG”，打印时选择“实际大小/100%”，按重叠带与红色对位十字现场拼接。
 
 ## 铅条生产排产规则
 
@@ -203,6 +215,71 @@ curl -s localhost:3000/api/publications/diff -H 'Content-Type: application/json'
 `diff.frameTotals` 为分项合计；每个合计都含 `kept/removed/added` 三个长度（mm，
 两位小数），`counts` 为对应段数。
 
+## 1:1 分张打印规则
+
+- **输入（全部整数毫米）**：`paperWidth`/`paperHeight` 纸张宽高（必须为正）、`margin` 四边统一留白（可为 0）、`overlap` 相邻页重叠宽度（必须为正）。
+- **可打印区域**：`(paperWidth − 2·margin) × (paperHeight − 2·margin)`；非正时整单拒绝（`printable_not_positive`）。重叠必须**严格小于**可打印区域的**每一条**边长，否则拒绝（`overlap_too_large`）。
+- **分页步距**：某方向内容长 `L`、可打印长 `p`、重叠 `o`，步距为 `p − o`；页数 `n = L ≤ p ? 1 : ceil((L − o)/(p − o))`，因此任意相邻页重叠不少于 `o`，末页覆盖末端恰好到窗框边。
+- **编号**：行自下而上（对应图纸 y 轴正方向）、列自左而右；页码先行内从左到右、再从下到上，`page = (row−1)·cols + col`。
+- **拼接标记**：每页四边给出存在相邻页的方向、邻页页码、重叠带范围（相邻两页对同一拼接边算出的范围**完全相同**），长边上沿带长 1/4、1/2、3/4 放置红色对位十字（短边放正中一个），并标注十字的图纸坐标。
+- **SVG 内容**：根元素 `width="<paperWidth>mm" height="<paperHeight>mm"`、`viewBox` 同值，打印按 1:1；玻璃片多边形、编号/面积、颜色与外框矩形全部来自发布快照；整页图纸内容套在 `clipPath`（即可打印区域）内，跨页轮廓自然裁切；重叠带在两页以相同图纸坐标重复绘制；页内含 0–100 mm 的**毫米校准标尺**（可打印区域过窄时改竖尺）与“实际大小/100%、勿缩放”提示。
+- **页数上限**：`cols × rows > 200` 时返回 422（`too_many_pages`，附 `cols/rows/totalPages`），**不输出任何部分页面**。
+- **只读**：两个接口均不写数据库，草稿、发布快照、生产计划、库存都不受影响。
+
+### 分张打印调用示例（curl）
+
+```bash
+# 1) 生成拼接预览（A4、四边留白 10mm、相邻页重叠 15mm）
+curl -s -X POST localhost:3000/api/designs/1/publications/1/print/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"paperWidth":210,"paperHeight":297,"margin":10,"overlap":15}'
+# -> { ok:true, preview:{ designId, version, publicationId,
+#      print:{ paper:{width,height}, margin, overlap,
+#              printable:{width,height}, content:{width,height},
+#              cols, rows, totalPages, pageNumbering,
+#              pages:[ { page,row,col,rows,cols,
+#                        coverage:{x0,y0,x1,y1,width,height},
+#                        seams:[{edge,direction,paperCoord,drawingCoord,neighborPage,
+#                                overlap:{x0,y0,x1,y1,width,height},
+#                                crosses:[{x,y}]}],
+#                        svgUrl } ] } } }
+
+# 2) 下载第 1 页 SVG（参数须与预览一致；返回 image/svg+xml，物理尺寸 mm）
+curl -s -G localhost:3000/api/designs/1/publications/1/print/page \
+  --data-urlencode 'paperWidth=210' --data-urlencode 'paperHeight=297' \
+  --data-urlencode 'margin=10' --data-urlencode 'overlap=15' \
+  --data-urlencode 'page=1' -o page-1.svg
+
+# 非法参数：可打印尺寸非正（留白 200 ≥ 半边长）
+curl -s -X POST localhost:3000/api/designs/1/publications/1/print/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"paperWidth":210,"paperHeight":297,"margin":200,"overlap":5}'
+# -> 400 {"ok":false,"code":"printable_not_positive", ...}
+
+# 非法参数：重叠不小于可打印边长（可打印 190×277）
+curl -s -X POST localhost:3000/api/designs/1/publications/1/print/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"paperWidth":210,"paperHeight":297,"margin":10,"overlap":190}'
+# -> 400 {"ok":false,"code":"overlap_too_large", ...}
+
+# 页数超过 200（5mm 纸、1mm 留白 → 3×3 可打印，600×400 图纸 = 200×134 页）
+curl -s -X POST localhost:3000/api/designs/1/publications/1/print/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"paperWidth":5,"paperHeight":5,"margin":1,"overlap":1}'
+# -> 422 {"ok":false,"code":"too_many_pages","cols":200,"rows":134,"totalPages":26800,"maxPages":200}
+
+# 版本不存在 / 页码越界
+curl -s -X POST localhost:3000/api/designs/1/publications/99/print/preview \
+  -H 'Content-Type: application/json' \
+  -d '{"paperWidth":210,"paperHeight":297,"margin":10,"overlap":15}'
+# -> 404 {"ok":false,"error":"发布版 v99 不存在"}
+curl -s -G localhost:3000/api/designs/1/publications/1/print/page \
+  --data-urlencode 'paperWidth=210' --data-urlencode 'paperHeight=297' \
+  --data-urlencode 'margin=10' --data-urlencode 'overlap=15' \
+  --data-urlencode 'page=99'
+# -> 400 {"ok":false,"error":"页码必须是 1–8 之间的整数"}
+```
+
 ### HTTP 调用示例（curl）
 
 ```bash
@@ -246,12 +323,15 @@ src/
   geometry.js            精确几何校验、覆盖/缺口分析、铅条合并
   leaddiff.js            两版铅条核对（整数直线分组、区间沿用/取消/新增、拆分）
   cutting.js             铅条切段排产（0.01mm 整数运算、FFD、刀损）
+  printsheet.js          1:1 分张打印（整数毫米分页、拼接标记、逐页 SVG/毫米标尺）
 public/
-  index.html / style.css / app.js   单页前端（Canvas 编辑器/发布视图/版本核对/铅条生产）
+  index.html / style.css / app.js   单页前端（Canvas 编辑器/发布视图/版本核对/分张打印/铅条生产）
 test/
   geometry.test.js       几何算法测试（node --test）
   leaddiff.test.js       两版核对：反向/顺序/T接归一、部分重叠拆分、斜向合计舍入、非同图纸报错
   cutting.test.js        切段解析与 FFD 排产测试
+  printsheet.test.js     分张分页/重叠坐标一致/页数上限/SVG 物理尺寸与裁剪测试
+  print.api.test.js      分张打印端到端（预览/逐页 SVG、非法参数整单拒绝、404/422、只读）
   plans.api.test.js      生产计划端到端测试（含并发不超卖、快照绑定）
   diff.api.test.js       两版核对端到端测试（GET/POST、404/400、只读不改变快照/计划/库存）
 ```

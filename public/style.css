@@ -224,3 +224,17 @@ td.added.num, th.added.num { color: #2e7d4f; }
   border: 1px solid #d32f2f;
 }
 .diff-legend .lg.added { background: #2e7d4f; }
+
+/* 分张打印逐页列表 */
+#printPageList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.print-page-item {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 64px 8px 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.print-page-item:hover { background: #f2efe7; }
+.print-page-item.active { border-color: var(--primary); background: #eef3fa; }
+.print-page-item .icon-btn { position: absolute; right: 8px; top: 8px; }

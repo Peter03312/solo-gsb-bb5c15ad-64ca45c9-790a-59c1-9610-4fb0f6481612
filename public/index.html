@@ -13,6 +13,7 @@
       <button id="tabDraft" class="tab active">草稿编辑</button>
       <button id="tabPublished" class="tab">已发布图纸</button>
       <button id="tabDiff" class="tab">版本核对</button>
+      <button id="tabPrint" class="tab">分张打印</button>
       <button id="tabProduction" class="tab">铅条生产</button>
     </nav>
   </header>
@@ -161,6 +162,56 @@
           <span><i class="lg added"></i>新增（较晚版独有）</span>
         </div>
         <div id="diffCanvasHint" class="hint">选择两个发布版后点击“核对”，结果同时在图与表中展示。</div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============ 分张打印视图 ============ -->
+  <main id="viewPrint" class="view" hidden>
+    <aside class="panel">
+      <section>
+        <h2>1:1 分张打印</h2>
+        <label>图纸
+          <select id="printDesignSelect"></select>
+        </label>
+        <label>已发布版本
+          <select id="printVersionSelect"></select>
+        </label>
+        <div class="form-row two">
+          <label>纸张宽 (mm)<input id="printPaperW" type="number" min="1" step="1" value="210"></label>
+          <label>纸张高 (mm)<input id="printPaperH" type="number" min="1" step="1" value="297"></label>
+        </div>
+        <div class="form-row two">
+          <label>四边留白 (mm)<input id="printMargin" type="number" min="0" step="1" value="10"></label>
+          <label>相邻页重叠 (mm)<input id="printOverlap" type="number" min="1" step="1" value="15"></label>
+        </div>
+        <div class="btn-row">
+          <button id="btnPrintPreview" class="primary big">生成拼接预览</button>
+        </div>
+        <div id="printMsg" class="hint">按实物 1:1 分张：纸张尺寸与重叠均为正整数毫米，留白可为 0 但必须小于纸张半边长；总页数最多 200。预览与下载均为只读，不影响草稿、发布版、生产计划与库存。</div>
+      </section>
+
+      <section id="printSummarySection" hidden>
+        <h2>分页结果</h2>
+        <div id="printSummary"></div>
+        <div class="btn-row">
+          <button id="btnPrintDownloadAll">逐页下载全部 SVG</button>
+        </div>
+        <div class="hint">浏览器将逐页另存 SVG；每页文件内尺寸以 mm 标定，打印时务必选择“实际大小 / 100%”，不要勾选“适应页面”。</div>
+      </section>
+
+      <section id="printPageListSection" hidden>
+        <h2>逐页明细 / 下载</h2>
+        <ul id="printPageList"></ul>
+      </section>
+    </aside>
+
+    <section class="canvas-wrap">
+      <div id="printBanner" class="banner" hidden></div>
+      <canvas id="printCanvas" width="900" height="640"></canvas>
+      <div class="lead-panel">
+        <h2>拼接示意（行自下而上、列自左而右）</h2>
+        <div id="printCanvasHint" class="hint">选择已发布版本与纸张参数后点击“生成拼接预览”：蓝框为每页覆盖的图纸范围，绿色虚线为拼接边，红色十字为跨页对位标记；点击列表可高亮单页。</div>
       </div>
     </section>
   </main>

@@ -6,6 +6,7 @@ const db = require('./db');
 const geo = require('./geometry');
 const cut = require('./cutting');
 const leadDiff = require('./leaddiff');
+const printSheet = require('./printsheet');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'studio.db');
@@ -303,6 +304,90 @@ app.post('/api/publications/diff', (req, res) => {
   const built = buildPublicationDiff(pubA, pubB);
   if (built.error) return fail(res, built.status, built.error);
   res.json({ ok: true, ...built });
+});
+
+// ---------- 已发布图纸 1:1 分张打印（只读，不改草稿/发布版/计划/库存） ----------
+
+// 由版本号加载发布版，不存在时按调用方要求返回 404
+function loadVersionOrReject(res, designId, version) {
+  const pub = db.getPublicationByVersion(designId, version);
+  if (!pub) {
+    fail(res, 404, `发布版 v${version} 不存在`);
+    return null;
+  }
+  return pub;
+}
+
+// POST /api/designs/:designId/publications/:version/print/preview
+//   body: { paperWidth, paperHeight, margin, overlap }（整数毫米）
+//   返回行列总页数、每页覆盖的图纸坐标与拼接标记；非法输入整单拒绝，不输出部分页面。
+app.post('/api/designs/:designId/publications/:version/print/preview', (req, res) => {
+  const design = loadDesignOr404(req, res);
+  if (!design) return;
+  const version = Number(req.params.version);
+  if (!Number.isInteger(version) || version <= 0) return fail(res, 400, '版本号必须是正整数');
+  const pub = loadVersionOrReject(res, design.id, version);
+  if (!pub) return;
+  const pr = printSheet.parseParams(req.body || {});
+  if (!pr.ok) {
+    return res.status(pr.status).json({ ok: false, error: pr.error, code: pr.code });
+  }
+  const built = printSheet.buildLayout(pub.snapshot, pr.params);
+  if (!built.ok) {
+    return res.status(built.status).json({
+      ok: false, error: built.error, code: built.code,
+      cols: built.cols, rows: built.rows, totalPages: built.totalPages, maxPages: built.maxPages,
+    });
+  }
+  res.json({
+    ok: true,
+    preview: {
+      designId: design.id,
+      designName: pub.snapshot.name,
+      version,
+      publicationId: pub.id,
+      print: printSheet.serializePreview(design.id, version, built.layout),
+    },
+  });
+});
+
+// GET /api/designs/:designId/publications/:version/print/page
+//   query: paperWidth,paperHeight,margin,overlap,page（与预览相同的整数毫米参数）
+//   返回该页 SVG（image/svg+xml，物理尺寸 mm）。
+app.get('/api/designs/:designId/publications/:version/print/page', (req, res) => {
+  const design = loadDesignOr404(req, res);
+  if (!design) return;
+  const version = Number(req.params.version);
+  if (!Number.isInteger(version) || version <= 0) return fail(res, 400, '版本号必须是正整数');
+  const pub = loadVersionOrReject(res, design.id, version);
+  if (!pub) return;
+  const q = req.query || {};
+  const pr = printSheet.parseParams({
+    paperWidth: Number(q.paperWidth), paperHeight: Number(q.paperHeight),
+    margin: Number(q.margin), overlap: Number(q.overlap),
+  });
+  if (!pr.ok) {
+    return res.status(pr.status).json({ ok: false, error: pr.error, code: pr.code });
+  }
+  const built = printSheet.buildLayout(pub.snapshot, pr.params);
+  if (!built.ok) {
+    return res.status(built.status).json({
+      ok: false, error: built.error, code: built.code,
+      cols: built.cols, rows: built.rows, totalPages: built.totalPages, maxPages: built.maxPages,
+    });
+  }
+  const pageNo = Number(q.page);
+  if (!Number.isInteger(pageNo) || pageNo < 1 || pageNo > built.layout.totalPages) {
+    return fail(res, 400, `页码必须是 1–${built.layout.totalPages} 之间的整数`);
+  }
+  const page = built.layout.pages.find((p) => p.page === pageNo);
+  const svg = printSheet.pageSvg(pub, pr.params, page);
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  // 文件名仅用 ASCII（图纸名可能含中文/特殊字符）
+  res.setHeader('Content-Disposition',
+    `inline; filename="design-${design.id}-v${version}-page-${pageNo}of${built.layout.totalPages}.svg"`);
+  res.send(svg);
 });
 
 app.get('/api/designs/:designId/publications/:version', (req, res) => {
